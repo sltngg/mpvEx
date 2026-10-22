@@ -13,6 +13,9 @@ interface PlaybackStateDao {
   @Query("SELECT * FROM PlaybackStateEntity WHERE mediaTitle = :mediaTitle LIMIT 1")
   suspend fun getVideoDataByTitle(mediaTitle: String): PlaybackStateEntity?
 
+  @Query("SELECT * FROM PlaybackStateEntity WHERE mediaTitle IN (:titles)")
+  suspend fun getByTitles(titles: List<String>): List<PlaybackStateEntity>
+
   @Query("DELETE FROM PlaybackStateEntity")
   suspend fun clearAllPlaybackStates()
 

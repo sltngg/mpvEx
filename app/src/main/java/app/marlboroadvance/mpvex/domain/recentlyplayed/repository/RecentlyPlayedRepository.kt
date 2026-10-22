@@ -28,6 +28,9 @@ interface RecentlyPlayedRepository {
 
   fun observeRecentlyPlayed(limit: Int = 50): Flow<List<RecentlyPlayedEntity>>
 
+  /** Fork: cari di riwayat berdasarkan nama/judul/path (teks polos, bukan pola LIKE). */
+  fun observeSearch(query: String, limit: Int): Flow<List<RecentlyPlayedEntity>>
+
   suspend fun getRecentlyPlayedBySource(
     launchSource: String,
     limit: Int = 10,

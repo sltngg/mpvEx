@@ -18,6 +18,39 @@ interface RecentlyPlayedDao {
   @Query("SELECT * FROM RecentlyPlayedEntity WHERE filePath = :filePath LIMIT 1")
   suspend fun getByFilePath(filePath: String): RecentlyPlayedEntity?
 
+  // --- Drive Player MPV (fork): riwayat per nama file ---
+  @Query("""
+    SELECT * FROM RecentlyPlayedEntity
+    WHERE filePath LIKE :p1 ESCAPE '\' OR filePath LIKE :p2 ESCAPE '\' OR filePath LIKE :p3 ESCAPE '\'
+    ORDER BY timestamp DESC
+  """)
+  suspend fun findByPathSuffix(p1: String, p2: String, p3: String): List<RecentlyPlayedEntity>
+
+  @Query("""
+    DELETE FROM RecentlyPlayedEntity
+    WHERE (filePath LIKE :p1 ESCAPE '\' OR filePath LIKE :p2 ESCAPE '\' OR filePath LIKE :p3 ESCAPE '\')
+    AND id != :keepId
+  """)
+  suspend fun deleteDuplicatesByPathSuffix(p1: String, p2: String, p3: String, keepId: Int)
+
+  @Query("SELECT COUNT(*) FROM RecentlyPlayedEntity")
+  suspend fun count(): Int
+
+  @Query("DELETE FROM RecentlyPlayedEntity WHERE id IN (SELECT id FROM RecentlyPlayedEntity ORDER BY timestamp DESC LIMIT -1 OFFSET :keep)")
+  suspend fun trimTo(keep: Int)
+
+  @Query("SELECT * FROM RecentlyPlayedEntity WHERE playlistId IS NULL ORDER BY timestamp DESC")
+  suspend fun getAllStandalone(): List<RecentlyPlayedEntity>
+
+  @Query("""
+    SELECT * FROM RecentlyPlayedEntity
+    WHERE (NOT (filePath LIKE '%.m3u%' OR filePath LIKE '%.m3u8%'))
+    AND (fileName LIKE :query ESCAPE '\' OR videoTitle LIKE :query ESCAPE '\' OR filePath LIKE :query ESCAPE '\')
+    ORDER BY timestamp DESC
+    LIMIT :limit
+  """)
+  fun observeSearch(query: String, limit: Int): Flow<List<RecentlyPlayedEntity>>
+
   @Query("SELECT * FROM RecentlyPlayedEntity ORDER BY timestamp DESC LIMIT 1")
   suspend fun getLastPlayed(): RecentlyPlayedEntity?
 

@@ -9,6 +9,9 @@ sealed class RecentlyPlayedItem {
   data class VideoItem(
     val video: Video,
     override val timestamp: Long,
+    // Fork: status tonton (dari data resume per nama file)
+    val isWatched: Boolean = false,
+    val progress: Float? = null,
   ) : RecentlyPlayedItem()
 
   data class PlaylistItem(

@@ -17,6 +17,15 @@ import app.marlboroadvance.mpvex.domain.recentlyplayed.repository.RecentlyPlayed
 import app.marlboroadvance.mpvex.utils.permission.PermissionUtils
 
 
+import app.marlboroadvance.mpvex.driveplayer.BackupManager
+import app.marlboroadvance.mpvex.driveplayer.ResumeIdentity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,20 +53,85 @@ class RecentlyPlayedViewModel(application: Application) : AndroidViewModel(appli
   private val _isLoading = MutableStateFlow(true)
   val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-  init {
-    // Observe recently played changes and update automatically
+  // --- Drive Player MPV (fork): pencarian + paging ringan ---
+  private val _query = MutableStateFlow("")
+  val query: StateFlow<String> = _query.asStateFlow()
+  private val _limit = MutableStateFlow(SEARCH_PAGE_SIZE) // hanya dipakai saat mencari
+  private var loadedEntityCount = 0
+
+  fun setQuery(q: String) {
+    _query.value = q
+    _limit.value = SEARCH_PAGE_SIZE
+  }
+
+  /** Muat hasil pencarian berikutnya. Tampilan awal tetap HOME_LIMIT entri, tanpa paging. */
+  fun loadMore() {
+    if (_query.value.isBlank()) return
+    if (loadedEntityCount >= _limit.value) _limit.value += SEARCH_PAGE_SIZE
+  }
+
+  @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+  private fun startObserving() {
     viewModelScope.launch {
       val db = org.koin.java.KoinJavaComponent.get<MpvExDatabase>(MpvExDatabase::class.java)
 
-      // Combine both flows - entities and playlists
       kotlinx.coroutines.flow.combine(
-        recentlyPlayedRepository.observeRecentlyPlayed(limit = 50),
-        db.recentlyPlayedDao().observeRecentlyPlayedPlaylists(limit = 50),
-      ) { entities, playlists ->
-        Pair(entities, playlists)
-      }.collect { (entities, playlists) ->
-        loadRecentVideosFromEntities(entities, playlists)
+        _query.debounce { if (it.isEmpty()) 0L else 250L },
+        _limit,
+      ) { q, l -> q to l }
+        .flatMapLatest { (q, l) ->
+          val searching = q.isNotBlank()
+          val entitiesFlow = if (searching) recentlyPlayedRepository.observeSearch(q, l)
+          else recentlyPlayedRepository.observeRecentlyPlayed(limit = HOME_LIMIT)
+          val playlistsFlow = if (searching) flowOf(emptyList())
+          else db.recentlyPlayedDao().observeRecentlyPlayedPlaylists(limit = 50)
+          kotlinx.coroutines.flow.combine(entitiesFlow, playlistsFlow) { e, p -> Pair(e, p) }
+        }.collect { (entities, playlists) ->
+          loadedEntityCount = entities.size
+          loadRecentVideosFromEntities(entities, playlists)
+        }
+    }
+  }
+
+  init {
+    startObserving()
+  }
+
+  /** Tandai status tonton tiap video dari data resume (satu query batch, bukan per item). */
+  private suspend fun annotateWatched(items: List<RecentlyPlayedItem>): List<RecentlyPlayedItem> {
+    val keys = items.mapNotNull { (it as? RecentlyPlayedItem.VideoItem)?.let { v -> ResumeIdentity.keyForPath(v.video.path) } }
+      .distinct()
+    if (keys.isEmpty()) return items
+    val dao = org.koin.java.KoinJavaComponent.get<MpvExDatabase>(MpvExDatabase::class.java).videoDataDao()
+    val states = keys.chunked(500).flatMap { dao.getByTitles(it) }.associateBy { it.mediaTitle }
+    val threshold = org.koin.java.KoinJavaComponent
+      .get<app.marlboroadvance.mpvex.preferences.BrowserPreferences>(
+        app.marlboroadvance.mpvex.preferences.BrowserPreferences::class.java,
+      ).watchedThreshold.get() / 100f
+    return items.map { item ->
+      if (item !is RecentlyPlayedItem.VideoItem) return@map item
+      val st = ResumeIdentity.keyForPath(item.video.path)?.let { states[it] } ?: return@map item
+      val total = st.lastPosition + st.timeRemaining
+      val ratio = if (total > 0) st.lastPosition.toFloat() / total else 0f
+      item.copy(
+        isWatched = st.hasBeenWatched || ratio >= threshold,
+        progress = ratio.takeIf { it in 0.01f..0.99f },
+      )
+    }
+  }
+
+  fun exportBackup(uri: Uri) = runBackup("Backup") { BackupManager.export(getApplication(), uri) }
+
+  fun importBackup(uri: Uri) = runBackup("Restore") { BackupManager.import(getApplication(), uri) }
+
+  private fun runBackup(label: String, block: suspend () -> BackupManager.Result) {
+    viewModelScope.launch {
+      val message = withContext(Dispatchers.IO) {
+        runCatching { block() }
+          .map { "$label selesai: ${it.playback} posisi, ${it.history} riwayat" }
+          .getOrElse { "$label gagal: ${it.message}" }
       }
+      android.widget.Toast.makeText(getApplication(), message, android.widget.Toast.LENGTH_LONG).show()
     }
   }
 
@@ -154,7 +228,7 @@ class RecentlyPlayedViewModel(application: Application) : AndroidViewModel(appli
       }
 
       // Sort by timestamp
-      val sortedItems = items.sortedByDescending { it.timestamp }
+      val sortedItems = annotateWatched(items.sortedByDescending { it.timestamp })
       _recentItems.value = sortedItems
 
       // Keep backward compatibility
@@ -670,6 +744,9 @@ class RecentlyPlayedViewModel(application: Application) : AndroidViewModel(appli
 
   
   companion object {
+    private const val HOME_LIMIT = 50 // tampilan awal riwayat
+    private const val SEARCH_PAGE_SIZE = 100 // hasil pencarian per halaman
+
     fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
       initializer {
         RecentlyPlayedViewModel(application)

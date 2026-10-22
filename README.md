@@ -85,6 +85,15 @@ Dilakukan dengan membaca kode, **bukan** dengan menjalankan app:
   5. Upstream tidak punya aturan "jangan seek jika >95%" saat restore (hanya mereset ke 0 jika posisi ≥ durasi−1 detik). → ditambahkan untuk identitas kanonik (resume_key dan file lokal). Stream tanpa `resume_key` tetap persis upstream.
 - **Belum terverifikasi di perangkat**: apakah `time-pos` yang di-set saat `FILE_LOADED` selalu diterima mpv untuk stream HTTP yang belum seekable. Lihat butir 2 di checklist; kalau gagal, laporkan.
 
+## Riwayat per file, pencarian, dan backup
+
+- **Riwayat "Recently Played" per file:** stream `http(s)` dengan nama file yang sama (URL berbeda) kini jadi **satu entri**; URL terbaru yang disimpan. Entri duplikat lama dibersihkan otomatis saat file itu diputar lagi. Jumlah baris riwayat dibatasi **5.000** (yang tertua dibuang). Posisi resume tidak terpengaruh karena disimpan di tabel terpisah (satu baris per nama file, tidak dibatasi).
+- **Pencarian:** ikon cari di halaman riwayat; mencari nama/judul/URL di seluruh riwayat (bukan hanya yang tampil). Tampilan awal riwayat hanya 50 entri terbaru; hasil pencarian dimuat bertahap (100 per halaman) agar ringan walau ribuan entri.
+- **Status ditonton:** kartu video di riwayat menampilkan penanda "sudah ditonton" dan progres, diambil dari data resume per nama file (satu query batch).
+- **Backup/restore:** menu titik tiga di halaman riwayat. Backup = satu file JSON berisi semua posisi resume + riwayat (tanpa subtitle eksternal). Restore **menggabungkan**: data yang sudah ada tidak ditimpa, penanda "ditonton" digabung, riwayat yang lebih baru menang. Dipakai saat pindah perangkat; karena kunci resume adalah nama file, posisi tetap nyambung walau URL sudah berganti.
+- Tidak ada perubahan skema database/migrasi Room.
+- **Belum teruji di perangkat** (dan belum dikompilasi), lihat peringatan di atas.
+
 ## Build via GitHub Actions (repo privat)
 
 Fork GitHub dari repo publik tidak bisa dijadikan privat, jadi buat repo privat baru lalu dorong isi repo ini:
@@ -154,6 +163,9 @@ Diubah:
 - `ui/player/PlayerActivity.kt`: hook identitas, simpan/restore (lihat bagian verifikasi)
 - `utils/media/MediaIdentifier.kt`: `forLocalPath` jadi kanonik; `legacyForLocalPath` = format lama
 - `utils/media/PlaybackStateOps.kt`: rename/hapus (lihat "Data lama")
+- `database/dao/{RecentlyPlayedDao,PlaybackStateDao}.kt`, `database/repository/RecentlyPlayedRepositoryImpl.kt`, `domain/recentlyplayed/repository/RecentlyPlayedRepository.kt`: riwayat per file, pencarian, batas baris
+- `ui/browser/recentlyplayed/{RecentlyPlayedItem,RecentlyPlayedViewModel,RecentlyPlayedScreen}.kt`: pencarian, paging, status ditonton, menu backup
+- `driveplayer/{BackupManager,RecentUi}.kt` (baru)
 - `ui/browser/{videolist/VideoListViewModel,folderlist/FolderListViewModel,filesystem/FileSystemBrowserViewModel}.kt`: lookup dengan cadangan kunci lama
 
 Dipindah: `.github/workflows/{build,pre-release,preview,release}.yml` → `.github/workflows-upstream/`.

@@ -1,6 +1,7 @@
 package app.marlboroadvance.mpvex.database.repository
 
 import app.marlboroadvance.mpvex.database.dao.RecentlyPlayedDao
+import app.marlboroadvance.mpvex.driveplayer.ResumeIdentity
 import app.marlboroadvance.mpvex.database.entities.RecentlyPlayedEntity
 import app.marlboroadvance.mpvex.domain.recentlyplayed.repository.RecentlyPlayedRepository
 import kotlinx.coroutines.flow.Flow
@@ -20,7 +21,16 @@ class RecentlyPlayedRepositoryImpl(
     playlistId: Int?,
   ) {
     // Check if there's an existing entry for this file
-    val existingEntry = recentlyPlayedDao.getByFilePath(filePath)
+    // Fork: stream dengan nama file sama (URL berbeda) dianggap satu entri; URL terbaru dipakai.
+    var existingEntry = recentlyPlayedDao.getByFilePath(filePath)
+    val suffixPattern = ResumeIdentity.streamSuffixPattern(filePath)
+    if (suffixPattern != null) {
+      val sameName = recentlyPlayedDao.findByPathSuffix(suffixPattern.exact, suffixPattern.withQuery, suffixPattern.withFragment)
+      if (existingEntry == null) existingEntry = sameName.firstOrNull()
+      existingEntry?.let {
+        recentlyPlayedDao.deleteDuplicatesByPathSuffix(suffixPattern.exact, suffixPattern.withQuery, suffixPattern.withFragment, it.id)
+      }
+    }
     
     if (existingEntry != null) {
       // Update existing entry, but preserve the original launchSource
@@ -55,6 +65,16 @@ class RecentlyPlayedRepositoryImpl(
       )
       recentlyPlayedDao.insert(entity)
     }
+    // Fork: batasi jumlah baris agar database tetap ringan (posisi resume tidak terpengaruh).
+    if (recentlyPlayedDao.count() > MAX_ROWS + TRIM_SLACK) recentlyPlayedDao.trimTo(MAX_ROWS)
+  }
+
+  override fun observeSearch(query: String, limit: Int): Flow<List<RecentlyPlayedEntity>> =
+    recentlyPlayedDao.observeSearch("%" + ResumeIdentity.escapeLike(query.trim()) + "%", limit)
+
+  private companion object {
+    const val MAX_ROWS = 5000
+    const val TRIM_SLACK = 200
   }
 
   override suspend fun getLastPlayed(): RecentlyPlayedEntity? = recentlyPlayedDao.getLastPlayed()

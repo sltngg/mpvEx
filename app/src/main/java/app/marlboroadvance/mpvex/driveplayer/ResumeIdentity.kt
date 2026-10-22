@@ -65,4 +65,38 @@ object ResumeIdentity {
     if (duration <= 0) return true
     return lastPosition < duration * RESTORE_LIMIT_RATIO
   }
+
+  /**
+   * Kunci kanonik dari path/URL sebuah video, atau null jika tidak bisa ditentukan.
+   * - http(s): segmen terakhir path (di-decode), harus mengandung titik
+   * - path lokal (/...): nama file
+   * Dipakai riwayat dan backup; harus selaras dengan identitas di PlayerActivity.
+   */
+  fun keyForPath(pathOrUrl: String): String? {
+    if (pathOrUrl.startsWith("http://", true) || pathOrUrl.startsWith("https://", true)) {
+      val seg = android.net.Uri.parse(pathOrUrl).lastPathSegment
+      return seg?.takeIf { it.isNotBlank() && it.contains('.') }?.let(::canonical)
+    }
+    if (pathOrUrl.startsWith("/")) return canonical(java.io.File(pathOrUrl).name)
+    return null
+  }
+
+  /** Tiga pola LIKE: URL berakhir di nama file, atau diikuti query (?...) atau fragment (#...). */
+  data class SuffixPatterns(val exact: String, val withQuery: String, val withFragment: String)
+
+  /**
+   * Pola SQL LIKE (ESCAPE '\\') yang cocok dengan semua URL http(s) yang berakhir di segmen nama
+   * file yang sama, dengan atau tanpa query/fragment, atau null jika bukan URL bernama.
+   * Segmen dibandingkan dalam bentuk ter-encode apa adanya (encoder Worker harus konsisten).
+   */
+  fun streamSuffixPattern(url: String): SuffixPatterns? {
+    if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return null
+    val seg = android.net.Uri.parse(url).encodedPath?.substringAfterLast('/')
+      ?.takeIf { it.contains('.') } ?: return null
+    val base = "%/" + escapeLike(seg)
+    return SuffixPatterns(base, "$base?%", "$base#%")
+  }
+
+  fun escapeLike(s: String): String =
+    s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 }

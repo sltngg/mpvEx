@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -98,6 +99,8 @@ object RecentlyPlayedScreen : Screen {
     val recentItems by viewModel.recentItems.collectAsState()
     val recentVideos by viewModel.recentVideos.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val searchQuery by viewModel.query.collectAsState()
+    var searchActive by rememberSaveable { mutableStateOf(false) }
     val deleteDialogOpen = rememberSaveable { mutableStateOf(false) }
     val deleteFilesCheckbox = rememberSaveable { mutableStateOf(false) }
     val advancedPreferences = koinInject<AdvancedPreferences>()
@@ -186,8 +189,24 @@ object RecentlyPlayedScreen : Screen {
 
     Scaffold(
         topBar = {
-          BrowserTopBar(
+          if (searchActive && !selectionManager.isInSelectionMode) {
+            app.marlboroadvance.mpvex.driveplayer.RecentSearchBar(
+              query = searchQuery,
+              onQueryChange = viewModel::setQuery,
+              onClose = {
+                viewModel.setQuery("")
+                searchActive = false
+              },
+            )
+          } else BrowserTopBar(
             title = "Recently Played",
+            onSearchClick = { searchActive = true },
+            additionalActions = {
+              app.marlboroadvance.mpvex.driveplayer.RecentBackupMenu(
+                onBackup = viewModel::exportBackup,
+                onRestore = viewModel::importBackup,
+              )
+            },
             isInSelectionMode = selectionManager.isInSelectionMode,
             selectedCount = selectionManager.selectedCount,
             totalCount = recentItems.size,
@@ -345,6 +364,7 @@ object RecentlyPlayedScreen : Screen {
             isInSelectionMode = selectionManager.isInSelectionMode,
             listState = listState,
             gridState = gridState,
+            onLoadMore = viewModel::loadMore,
           )
         }
       }
@@ -426,6 +446,7 @@ private fun RecentItemsContent(
   isInSelectionMode: Boolean = false,
   listState: LazyListState,
   gridState: LazyGridState,
+  onLoadMore: () -> Unit = {},
 ) {
   val gesturePreferences = koinInject<GesturePreferences>()
   val browserPreferences = koinInject<app.marlboroadvance.mpvex.preferences.BrowserPreferences>()
@@ -450,6 +471,17 @@ private fun RecentItemsContent(
 
   val coroutineScope = rememberCoroutineScope()
   val isRefreshing = remember { mutableStateOf(false) }
+
+  // Fork: muat halaman berikutnya saat mendekati akhir daftar
+  LaunchedEffect(isGridMode) {
+    androidx.compose.runtime.snapshotFlow {
+      if (isGridMode) {
+        gridState.layoutInfo.let { (it.visibleItemsInfo.lastOrNull()?.index ?: 0) to it.totalItemsCount }
+      } else {
+        listState.layoutInfo.let { (it.visibleItemsInfo.lastOrNull()?.index ?: 0) to it.totalItemsCount }
+      }
+    }.collect { (last, total) -> if (total > 0 && last >= total - 5) onLoadMore() }
+  }
 
   val thumbWidthDp = if (isGridMode) {
     (360.dp / videoGridColumns)
@@ -538,7 +570,8 @@ private fun RecentItemsContent(
                 is RecentlyPlayedItem.VideoItem -> {
                   VideoCard(
                     video = item.video,
-                    progressPercentage = null,
+                    progressPercentage = item.progress,
+                    isWatched = item.isWatched,
                     isSelected = selectionManager.isSelected(item),
                     onClick = {
                       if (selectionManager.isInSelectionMode) {
@@ -648,7 +681,8 @@ private fun RecentItemsContent(
                 is RecentlyPlayedItem.VideoItem -> {
                   VideoCard(
                     video = item.video,
-                    progressPercentage = null,
+                    progressPercentage = item.progress,
+                    isWatched = item.isWatched,
                     isSelected = selectionManager.isSelected(item),
                     onClick = {
                       if (selectionManager.isInSelectionMode) {
