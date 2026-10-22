@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.marlboroadvance.mpvex.database.repository.PlaylistRepository
+import app.marlboroadvance.mpvex.driveplayer.RecentBackupMenu
 import app.marlboroadvance.mpvex.domain.media.model.Video
 import app.marlboroadvance.mpvex.domain.media.model.VideoFolder
 import app.marlboroadvance.mpvex.domain.thumbnail.ThumbnailRepository
@@ -202,7 +203,7 @@ object RecentlyPlayedScreen : Screen {
             title = "Recently Played",
             onSearchClick = { searchActive = true },
             additionalActions = {
-              app.marlboroadvance.mpvex.driveplayer.RecentBackupMenu(
+              RecentBackupMenu(
                 onBackup = viewModel::exportBackup,
                 onRestore = viewModel::importBackup,
               )
